@@ -4,6 +4,8 @@
 #include <vector>
 #include <chrono>
 #include <mutex>
+#include <future>
+#include <memory>
 
 #include "ThreadPool.h"
 
@@ -27,6 +29,13 @@ struct TicketRequest
     int ticketCount;
 };
 
+struct PurchaseResult
+{
+    bool success;
+    string message;
+    vector<int> ticketIds;
+    int remainingTickets;
+};
 
 class TicketSystem
 {
@@ -61,12 +70,6 @@ public:
         int workerCount
     );
 
-
-    // 提交一个售票请求
-    bool submitRequest(
-        const TicketRequest& request
-    );
-
     int getRemainingTickets();
 
     void printSaleRecords();
@@ -75,8 +78,12 @@ public:
 
     void waitUntilFinished();
 
+    future<PurchaseResult> submitPurchaseRequest(
+        const TicketRequest& request
+    );
+
 private:
 
     // 真正的售票业务逻辑
-    void processOneRequest(const TicketRequest& request);
+    PurchaseResult processOneRequest(const TicketRequest& request);
 };

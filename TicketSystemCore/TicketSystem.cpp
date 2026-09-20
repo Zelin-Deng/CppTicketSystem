@@ -9,88 +9,63 @@ TicketSystem::TicketSystem(int ticketCount,int workerCount)
 	threadPool(workerCount)
 {}
 
-bool TicketSystem::submitRequest(const TicketRequest& request) {
+PurchaseResult TicketSystem::processOneRequest(const TicketRequest& request) {
 
-	return threadPool.submit(
-		[this, request]()
-		{
-			processOneRequest(request);
-		}
-	);
-}
+    lock_guard<mutex> lock(dataMutex);
 
-void TicketSystem::processOneRequest(const TicketRequest& request) {
+    PurchaseResult result;
 
-	lock_guard<mutex> lock(dataMutex);
+    // 1. 检查购票数量
+    if (request.ticketCount <= 0)
+    {
+        failedRequestCount++;
 
-	 
-	if (request.ticketCount <= 0)
-	{
-		failedRequestCount++;
+        result.success = false;
+        result.message = "Invalid ticket count";
+        result.remainingTickets = remainingTickets;
 
-		cout << "[FAILED ] "
-			<< "Request=" << request.requestId
-			<< " | User=" << request.userId
-			<< " | Reason=Invalid ticket count"
-			<< endl;
+        return result;
+    }
 
-		return;
-	}
+    // 2. 检查余票
+    if (remainingTickets < request.ticketCount)
+    {
+        failedRequestCount++;
 
-	if (remainingTickets < request.ticketCount)
-	{
-		failedRequestCount++;
+        result.success = false;
+        result.message = "Not enough tickets";
+        result.remainingTickets = remainingTickets;
 
-		cout << "[FAILED ] "
-			<< "Request=" << request.requestId
-			<< " | User=" << request.userId
-			<< " | Count=" << request.ticketCount
-			<< " | Reason=Not enough tickets"
-			<< " | Remaining=" << remainingTickets
-			<< endl;
+        return result;
+    }
 
-		return;
-	}
- 
-	vector<int> soldTicketIds;
+    // 3. 真正售票
+    for (int i = 0; i < request.ticketCount; i++)
+    {
+        int ticketId = nextTicketId++;
 
-	for (int i = 0; i < request.ticketCount; i++) {
+        result.ticketIds.push_back(ticketId);
 
-		const int soldTicketId = nextTicketId++;
+        SaleRecord record;
 
-		SaleRecord record;
-		record.ticketId = soldTicketId;
-		record.requestId = request.requestId;
-		record.userId = request.userId;
-		record.saleTime = chrono::system_clock::now();
+        record.ticketId = ticketId;
+        record.userId = request.userId;
+        record.requestId = request.requestId;
+        record.saleTime =
+            chrono::system_clock::now();
 
-		saleRecords.push_back(record);
-		soldTicketIds.push_back(soldTicketId);
-	}
+        saleRecords.push_back(record);
+    }
 
-	remainingTickets -= request.ticketCount;
+    remainingTickets -= request.ticketCount;
+    successRequestCount++;
 
-	successRequestCount++;
+    // 4. 返回业务结果
+    result.success = true;
+    result.message = "Purchase successful";
+    result.remainingTickets = remainingTickets;
 
-	cout << "[SUCCESS] "
-		<< "Request=" << request.requestId
-		<< " | User=" << request.userId
-		<< " | Count=" << request.ticketCount
-		<< " | Tickets=[";
-
-	for (size_t i = 0; i < soldTicketIds.size(); i++)
-	{
-		cout << soldTicketIds[i];
-
-		if (i != soldTicketIds.size() - 1)
-		{
-			cout << ", ";
-		}
-	}
-
-	cout << "]"
-		<< " | Remaining=" << remainingTickets
-		<< endl;
+    return result;
 }
 
 int TicketSystem::getRemainingTickets() {
@@ -132,4 +107,25 @@ void TicketSystem::printStatistics() {
 void TicketSystem::waitUntilFinished()
 {
 	threadPool.waitUntilFinished();
+}
+
+future<PurchaseResult> TicketSystem::submitPurchaseRequest(const TicketRequest& request) {
+
+    auto resultPromise =
+        make_shared<promise<PurchaseResult>>();
+
+    future<PurchaseResult> resultFuture =
+        resultPromise->get_future();
+
+    threadPool.submit(
+        [this, request, resultPromise]()
+        {
+            PurchaseResult result =
+                processOneRequest(request);
+
+            resultPromise->set_value(result);
+        }
+    );
+
+    return resultFuture;
 }

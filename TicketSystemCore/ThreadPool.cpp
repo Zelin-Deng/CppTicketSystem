@@ -37,6 +37,7 @@ ThreadPool::~ThreadPool() {
 }
 
 void ThreadPool::workerLoop() {
+
     while (true)
     {
         function<void()> task;
@@ -72,8 +73,7 @@ void ThreadPool::workerLoop() {
             // 当前任务执行结束
             activeTasks--;
 
-            // 队列没有等待任务
-            // 并且也没有worker正在执行任务
+            // 队列没有等待任务并且也没有worker正在执行任务
             if (tasks.empty() && activeTasks == 0)
             {
                 finishedCondition.notify_all();

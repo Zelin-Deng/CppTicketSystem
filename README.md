@@ -1,39 +1,33 @@
 # C++ 多线程售票系统
 
-使用 C++ 实现的多线程售票学习项目，逐步实践类封装、互斥锁、请求队列、生产者—消费者模型和通用线程池。
+使用 C++ 实现的售票学习项目，从类封装、互斥锁和请求队列，逐步演进到通用线程池和 HTTP API。
 
-## 当前版本：V4 — Thread Pool
-
-V4 在 V3 请求队列阶段的基础上，将任务队列和工作线程管理抽离到独立的 `ThreadPool`。`TicketSystem` 专注于库存校验、票号生成、销售记录和统计。
+## 当前版本：V5 — Network API
 
 ```text
-main.cpp 构造 TicketRequest
-    ↓
-TicketSystem::submitRequest()
-    ↓
-ThreadPool::submit() → queue<std::function<void()>>
-    ↓ condition_variable 唤醒工作线程
-ThreadPool::workerLoop()
-    ↓
-TicketSystem::processOneRequest()
-    ↓ dataMutex 保护业务数据
-校验数量与库存 → 生成票号 → 扣减库存 → 保存记录 → 输出结果
+客户端 / Postman
+    ↓ HTTP + JSON
+ApiServer：校验请求、生成请求编号
+    ↓ submitPurchaseRequest()
+TicketSystem → ThreadPool → processOneRequest()
+    ↓ promise / future 传回 PurchaseResult
+ApiServer → HTTP 状态码 + JSON 响应
 ```
 
-- 固定数量的工作线程处理通用任务，任务从队列取出后在队列锁之外执行。
-- `waitUntilFinished()` 等待任务队列为空且正在执行的任务数为零。
-- 线程池析构时等待已提交任务完成，唤醒并回收工作线程。
-- 购票数量必须大于零且不超过剩余库存；失败请求计入失败统计。
-- `submitRequest()` 的返回值表示任务是否被线程池接收，不代表购票成功；业务结果由任务处理并输出。
+- `GET /health`：健康检查。
+- `GET /tickets`：查询剩余票数。
+- `POST /tickets/purchase`：提交购票请求，返回票号和剩余库存。
+- 业务线程池固定为 3 个线程，库存、票号与销售记录由互斥锁保护。
+- 服务器启动时初始化 100 张票；数据保存在内存中，重启后重置。
 
 ## 版本演进与历史编号
 
-这里的 V1–V4 表示当前学习路线中的阶段。早期 GitHub 编号与路线编号不同；保留原有提交、分支名和标签，不重写历史。
+这里的 V1–V5 表示当前学习路线中的阶段。早期 GitHub 编号与路线编号不同；保留原有提交、分支名和标签，不重写历史。
 
 | 当前路线阶段 | 功能 | 对应的已有 Git 历史 |
 | --- | --- | --- |
 | V1 — 基础多线程 | 学习线程与共享票数，是路线中的起点 | 未单独作为本仓库的首次提交 |
-| V2 — 类封装与互斥锁 | `TicketSystem` 类、互斥保护、销售记录和窗口统计 | 首次提交 `6c52e77`，当时命名为 V1 |
+| V2 — 类封装与互斥锁 | `TicketSystem` 类、互斥保护、销售记录和窗口统计 | 首次提交 `6c52e77`，当时命名为 V1，标签 `v1.0` |
 | V3 — Request Queue / Producer–Consumer | `TicketRequest`、请求队列、条件变量、工作线程消费请求 | `3145b96`，早期分支 `feature/v2-request-queue`、标签 `v2.0` |
 | V4 — Thread Pool | 独立线程池、通用任务队列、等待任务完成和线程回收 | `f774eef`，分支 `feature/v4-thread-pool`、标签 `v4.0` |
 
@@ -51,43 +45,83 @@ TicketSystem::processOneRequest()
 
 V4 把 V3 的线程调度职责移入 `ThreadPool`，使用 `queue<std::function<void()>>` 保存可调用任务。`TicketSystem` 将购票请求封装为任务提交给线程池，保留业务数据的互斥保护。
 
-已发布的 `v4.0` 标签保留在源码提交 `f774eef`。本次 README 整理作为后续文档提交，不移动该标签；查看 `v4.0` 时会看到发布当时的旧 README。
+已发布的 `v4.0` 标签保留在源码提交 `f774eef`。V4 的 README 整理作为后续文档提交，不移动该标签；查看 `v4.0` 时会看到发布当时的旧 README。
+
+### V5 — Network API
+
+新增 `ApiServer`，通过 cpp-httplib 接收 HTTP 请求，使用 nlohmann/json 解析和生成 JSON。`TicketSystem::submitPurchaseRequest()` 返回 `future<PurchaseResult>`，HTTP 处理函数等待线程池中的业务任务完成后返回状态码和结果。对应分支为 `feature/v5-network-api`，版本标签为 `v5.0`。
 
 ## 项目结构
 
 ```text
 CppTicketSystem.sln
 TicketSystemCore/
-├── main.cpp                       # 演示入口
-├── TicketSystem.h / .cpp           # 购票请求、业务处理与统计
-├── ThreadPool.h / .cpp             # 通用任务队列与工作线程
-├── TicketSystemCore.vcxproj        # Visual Studio 项目
+├── main.cpp                    # 启动服务器
+├── ApiServer.h / .cpp          # HTTP 路由与 JSON 转换
+├── TicketSystem.h / .cpp       # 购票业务与异步结果
+├── ThreadPool.h / .cpp         # 任务队列与工作线程
+├── external/httplib.h          # cpp-httplib 0.56.0
+├── external/json.hpp           # nlohmann/json 3.12.0
+├── TicketSystemCore.vcxproj
 └── TicketSystemCore.vcxproj.filters
 ```
 
+两个第三方库均以头文件随仓库提供，文件中保留上游版权及许可证声明。
+
 ## 构建与运行
 
-使用 Visual Studio 2022，安装“使用 C++ 的桌面开发”、MSVC v143 工具集和 Windows SDK。
+使用 Windows 10 或更新系统、Visual Studio 2022、MSVC v143 工具集和 Windows SDK，并安装“使用 C++ 的桌面开发”。
 
 1. 打开 `CppTicketSystem.sln`。
 2. 选择 `Debug | x64` 或 `Release | x64`，生成解决方案。
-3. 运行 `TicketSystemCore`（可使用 Ctrl+F5）。
+3. 使用 Ctrl+F5 运行 `TicketSystemCore`，保持服务器窗口开启。
+4. 使用 Postman 或下方命令访问 `http://localhost:8080`。
 
-也可在 Visual Studio Developer PowerShell 中从仓库根目录执行：
+也可在 Visual Studio Developer PowerShell 的仓库根目录执行：
 
 ```powershell
 msbuild .\CppTicketSystem.sln /m /p:Configuration=Debug /p:Platform=x64
 .\x64\Debug\TicketSystemCore.exe
 ```
 
-当前示例配置 100 张票、3 个工作线程，提交 7 个请求：6 个有效请求共购买 17 张票，1 个请求因数量为 0 被拒绝。完成后应剩余 83 张票，成功请求 6 个、失败请求 1 个，销售记录 17 条。并发执行时，请求处理顺序和票号与请求的对应关系可能不同。
+程序持续监听 `0.0.0.0:8080`；本机测试使用 `localhost:8080`，确保端口未被占用。使用 Ctrl+C 停止程序。
 
-当前是单机控制台学习版本。调用方应提供正数工作线程数量，提交有效且不抛出异常的任务，并在销毁线程池前停止提交；当前实现未提供任务异常捕获或构造参数校验。
+## API 使用示例
 
-## 后续规划
+在另一个 PowerShell 窗口执行：
 
-V5 计划增加网络/API 层，让外部客户端通过 HTTP 调用售票业务；当前 V4 尚未实现网络接口。
+```powershell
+Invoke-RestMethod http://localhost:8080/health
+Invoke-RestMethod http://localhost:8080/tickets
+Invoke-RestMethod http://localhost:8080/tickets/purchase -Method Post -ContentType 'application/json' -Body '{"user_id":1001,"ticket_count":2}'
+```
+
+初始余票查询返回 `{"remaining_tickets":100}`。首次购买 2 张票成功时返回 HTTP 201：
+
+```json
+{
+  "success": true,
+  "message": "Purchase successful",
+  "ticket_ids": [1, 2],
+  "remaining_tickets": 98
+}
+```
+
+| 场景 | HTTP 状态码 | 说明 |
+| --- | --- | --- |
+| 健康检查、余票查询 | 200 | 返回服务器状态或剩余票数 |
+| 购票成功 | 201 | 返回票号列表与剩余票数 |
+| JSON 无法解析、缺少字段、字段不是整数 | 400 | 拒绝无效请求 |
+| `ticket_count` 小于等于 0 | 400 | 拒绝无效购票数量 |
+| 库存不足 | 409 | 不扣减库存 |
+| 处理函数捕获到其他标准异常 | 500 | 返回内部错误 |
+
+`user_id` 和 `ticket_count` 是必填整数字段；`requestId` 由服务器自动生成。并发请求的处理顺序不固定，返回票号也可能不同。
+
+## 当前范围与后续改进
+
+V5 是 HTTP 售票学习版本，尚未实现登录鉴权、持久化、退款或 `/statistics` 接口。当前未对整数超出 C++ `int` 范围的情况做显式校验，线程池也未提供任务异常捕获或工作线程数量校验。后续可完善参数边界、异常处理和数据库存储。
 
 ## 仓库文件管理
 
-仅提交源码、项目配置和文档。`.gitignore` 排除 `.vs/`、`x64/`、`x86/`、`Debug/`、`Release/` 以及 `*.obj`、`*.exe`、`*.pdb` 等构建产物。
+仅提交源码、第三方头文件、项目配置和文档。`.gitignore` 排除 `.vs/`、`x64/`、`x86/`、`Debug/`、`Release/` 以及 `*.obj`、`*.exe`、`*.pdb` 等构建产物。
