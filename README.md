@@ -4,14 +4,21 @@
 
 ## 当前版本：V5 — Network API
 
-```text
-客户端 / Postman
-    ↓ HTTP + JSON
-ApiServer：校验请求、生成请求编号
-    ↓ submitPurchaseRequest()
-TicketSystem → ThreadPool → processOneRequest()
-    ↓ promise / future 传回 PurchaseResult
-ApiServer → HTTP 状态码 + JSON 响应
+文档导航：[V5 架构图与执行流程](docs/V5-ARCHITECTURE.md) · [HTTP API 说明](docs/API.md)
+
+```mermaid
+flowchart TD
+    Client[客户端 / Postman] -->|HTTP + JSON| API[ApiServer / cpp-httplib]
+    API -->|GET /health| Health[健康检查响应]
+    API -->|GET /tickets| Read[读取剩余票数]
+    API -->|POST /tickets/purchase| Submit[TicketSystem.submitPurchaseRequest]
+    Submit -->|封装任务| Pool[ThreadPool / 3 个业务工作线程]
+    Pool --> Process[TicketSystem.processOneRequest]
+    Process -->|dataMutex 保护| Data[库存 / 票号 / 销售记录 / 统计]
+    Read -->|dataMutex 保护| Data
+    Process -->|promise 设置 PurchaseResult| Future[future]
+    Future -->|HTTP 处理线程等待 get| API
+    API -->|状态码 + JSON| Client
 ```
 
 - `GET /health`：健康检查。
@@ -19,6 +26,8 @@ ApiServer → HTTP 状态码 + JSON 响应
 - `POST /tickets/purchase`：提交购票请求，返回票号和剩余库存。
 - 业务线程池固定为 3 个线程，库存、票号与销售记录由互斥锁保护。
 - 服务器启动时初始化 100 张票；数据保存在内存中，重启后重置。
+
+HTTP 请求由 cpp-httplib 调度，购票任务交给独立业务线程池执行；HTTP 处理线程通过 `future.get()` 等待结果。3 个业务线程共享同一把业务锁，库存检查和整单扣减在锁内完成，库存不足时整单失败。
 
 ## 版本演进与历史编号
 
@@ -30,6 +39,7 @@ ApiServer → HTTP 状态码 + JSON 响应
 | V2 — 类封装与互斥锁 | `TicketSystem` 类、互斥保护、销售记录和窗口统计 | 首次提交 `6c52e77`，当时命名为 V1，标签 `v1.0` |
 | V3 — Request Queue / Producer–Consumer | `TicketRequest`、请求队列、条件变量、工作线程消费请求 | `3145b96`，早期分支 `feature/v2-request-queue`、标签 `v2.0` |
 | V4 — Thread Pool | 独立线程池、通用任务队列、等待任务完成和线程回收 | `f774eef`，分支 `feature/v4-thread-pool`、标签 `v4.0` |
+| V5 — Network API | HTTP 路由、JSON 请求响应、`promise / future` 传回购票结果 | `31ad72b`，分支 `feature/v5-network-api`、标签 `v5.0` |
 
 **早期 `feature/v2-request-queue` 实际对应当前规划中的 V3 Request Queue 阶段。** 旧提交信息、README 或标签中的 V2 是当时的开发编号，不表示缺少请求队列阶段。
 
@@ -55,6 +65,10 @@ V4 把 V3 的线程调度职责移入 `ThreadPool`，使用 `queue<std::function
 
 ```text
 CppTicketSystem.sln
+README.md
+docs/
+├── V5-ARCHITECTURE.md          # V5 架构图、时序图与并发模型
+└── API.md                     # HTTP 接口、字段、状态码与调用示例
 TicketSystemCore/
 ├── main.cpp                    # 启动服务器
 ├── ApiServer.h / .cpp          # HTTP 路由与 JSON 转换
@@ -117,6 +131,8 @@ Invoke-RestMethod http://localhost:8080/tickets/purchase -Method Post -ContentTy
 | 处理函数捕获到其他标准异常 | 500 | 返回内部错误 |
 
 `user_id` 和 `ticket_count` 是必填整数字段；`requestId` 由服务器自动生成。并发请求的处理顺序不固定，返回票号也可能不同。
+
+完整请求约束、错误响应和可重复的手工验证步骤见 [API 说明](docs/API.md)。响应中的余票是处理时的快照；重复提交同一请求会再次购票，当前没有幂等去重机制。
 
 ## 当前范围与后续改进
 
