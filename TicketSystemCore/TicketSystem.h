@@ -42,14 +42,8 @@ class TicketSystem
 private:
 
     // ===== 售票业务数据 =====
-    int totalTickets;
     int remainingTickets;
     int nextTicketId;
-
-
-    // ===== 统计 =====
-    int successRequestCount;
-    int failedRequestCount;
 
 
     // ===== 保护售票业务数据 =====
@@ -71,12 +65,6 @@ public:
     );
 
     int getRemainingTickets();
-
-    void printSaleRecords();
-
-    void printStatistics();
-
-    void waitUntilFinished();
 
     future<PurchaseResult> submitPurchaseRequest(
         const TicketRequest& request
