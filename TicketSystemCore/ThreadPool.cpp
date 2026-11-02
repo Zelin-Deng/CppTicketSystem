@@ -108,8 +108,7 @@ void ThreadPool::waitUntilFinished()
         lock,
         [this]()
         {
-            return tasks.empty()
-                && activeTasks == 0;
+            return tasks.empty() && activeTasks == 0;
         }
     );
 }

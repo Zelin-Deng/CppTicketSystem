@@ -8,19 +8,10 @@
 #include <memory>
 
 #include "ThreadPool.h"
+#include "TicketRepository.h"
+#include "SaleRecord.h"
 
 using namespace std;
-
-
-struct SaleRecord
-{
-    int ticketId;
-    int userId;
-    int requestId;
-
-    chrono::system_clock::time_point saleTime;
-};
-
 
 struct TicketRequest
 {
@@ -41,6 +32,9 @@ class TicketSystem
 {
 private:
 
+    // 数据库访问层
+    TicketRepository& ticketRepository;
+
     // ===== 售票业务数据 =====
     int remainingTickets;
     int nextTicketId;
@@ -60,7 +54,7 @@ private:
 public:
 
     TicketSystem(
-        int ticketCount,
+        TicketRepository& repository,
         int workerCount
     );
 

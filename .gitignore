@@ -23,3 +23,13 @@ Release/
 *.exe
 *.VC.db
 *.VC.opendb
+
+# SQLite runtime data
+TicketSystemCore/ticket.db
+TicketSystemCore/ticket.db-journal
+TicketSystemCore/ticket.db-wal
+TicketSystemCore/ticket.db-shm
+ticket.db
+ticket.db-journal
+ticket.db-wal
+ticket.db-shm

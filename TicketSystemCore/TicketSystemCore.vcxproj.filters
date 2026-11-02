@@ -27,6 +27,12 @@
     <ClCompile Include="ApiServer.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="TicketRepository.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="external\sqlite3.c">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ApiServer.h">
@@ -42,6 +48,15 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="external\httplib.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="TicketRepository.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="SaleRecord.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="external\sqlite3.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

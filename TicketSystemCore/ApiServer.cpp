@@ -4,9 +4,26 @@
 
 #include <iostream>
 #include <string>
+#include <exception>
 
 using namespace std;
 using json = nlohmann::json;
+
+namespace
+{
+    void sendError(httplib::Response& res,int status,const string& message)
+    {
+
+        json response;
+
+        response["success"] = false;
+        response["message"] = message;
+
+        res.status = status;
+
+        res.set_content(response.dump(),"application/json");
+    }
+}
 
 ApiServer::ApiServer(TicketSystem& system)
     : ticketSystem(system)
@@ -16,6 +33,35 @@ ApiServer::ApiServer(TicketSystem& system)
 void ApiServer::start(int port)
 {
     httplib::Server server;
+
+    //处理全局异常
+    server.set_exception_handler(
+        [](const httplib::Request& req,
+            httplib::Response& res,
+            std::exception_ptr ep)
+        {
+            try
+            {
+                std::rethrow_exception(ep);
+            }
+            catch (const std::exception& e)
+            {
+                std::cerr
+                    << "Server exception: "
+                    << e.what()
+                    << std::endl;
+            }
+            catch (...)
+            {
+                std::cerr
+                    << "Unknown server exception"
+                    << std::endl;
+            }
+
+            sendError(res, 500, "Internal server error.");
+
+        }
+    );
 
     // Health check
     server.Get(
@@ -38,13 +84,13 @@ void ApiServer::start(int port)
         {
             int remaining = ticketSystem.getRemainingTickets();
 
-            string response =
-                "{\"remaining_tickets\":" +
-                to_string(remaining) +
-                "}";
+            json response;
+
+            response["remaining_tickets"] =
+                remaining;
 
             res.set_content(
-                response,
+                response.dump(),
                 "application/json"
             );
         }
@@ -66,18 +112,7 @@ void ApiServer::start(int port)
                 if (!body.contains("user_id") ||
                     !body.contains("ticket_count"))
                 {
-                    json response;
-
-                    response["success"] = false;
-                    response["message"] =
-                        "Missing required fields";
-
-                    res.status = 400;
-
-                    res.set_content(
-                        response.dump(),
-                        "application/json"
-                    );
+                    sendError(res, 400, "Missing required fields.");
 
                     return;
                 }
@@ -87,18 +122,7 @@ void ApiServer::start(int port)
                 if (!body["user_id"].is_number_integer() ||
                     !body["ticket_count"].is_number_integer())
                 {
-                    json response;
-
-                    response["success"] = false;
-                    response["message"] =
-                        "user_id and ticket_count must be integers";
-
-                    res.status = 400;
-
-                    res.set_content(
-                        response.dump(),
-                        "application/json"
-                    );
+                    sendError(res, 400, "user_id and ticket_count must be integers.");
 
                     return;
                 }
@@ -109,16 +133,13 @@ void ApiServer::start(int port)
 
                 request.requestId = nextRequestId++;
                 request.userId = body["user_id"];
-                request.ticketCount =
-                    body["ticket_count"];
+                request.ticketCount = body["ticket_count"];
 
 
                 //提交给 TicketSystem
-                future<PurchaseResult> resultFuture =
-                    ticketSystem.submitPurchaseRequest(request);
+                future<PurchaseResult> resultFuture = ticketSystem.submitPurchaseRequest(request);
 
-                PurchaseResult result =
-                    resultFuture.get();
+                PurchaseResult result = resultFuture.get();
 
 
                 //构造 Response
@@ -126,20 +147,16 @@ void ApiServer::start(int port)
 
                 response["success"] = result.success;
                 response["message"] = result.message;
-                response["ticket_ids"] =
-                    result.ticketIds;
+                response["ticket_ids"] = result.ticketIds;
 
-                response["remaining_tickets"] =
-                    result.remainingTickets;
-
+                response["remaining_tickets"] = result.remainingTickets;
 
                 //HTTP 状态码
                 if (result.success)
                 {
                     res.status = 201;
                 }
-                else if (result.message ==
-                    "Not enough tickets")
+                else if (result.message == "Not enough tickets")
                 {
                     res.status = 409;
                 }
@@ -156,40 +173,13 @@ void ApiServer::start(int port)
             }
             catch (const json::parse_error&)
             {
-                json response;
-
-                response["success"] = false;
-                response["message"] =
-                    "Invalid JSON format";
-
-                res.status = 400;
-
-                res.set_content(
-                    response.dump(),
-                    "application/json"
-                );
+                sendError(res, 400, "Invalid JSON format.");
             }
-            catch (const exception&)
-            {
-                json response;
 
-                response["success"] = false;
-                response["message"] =
-                    "Internal server error";
-
-                res.status = 500;
-
-                res.set_content(
-                    response.dump(),
-                    "application/json"
-                );
-            }
         }
     );
 
-    cout << "Ticket Server started on port "
-        << port
-        << endl;
+    cout << "Ticket Server started on port "<< port << endl;
 
     server.listen("0.0.0.0", port);
 }

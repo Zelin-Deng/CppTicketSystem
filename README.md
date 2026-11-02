@@ -1,116 +1,42 @@
 # C++ 多线程售票系统
 
-使用 C++ 实现的售票学习项目，从类封装、互斥锁和请求队列，逐步演进到通用线程池和 HTTP API。
+大学生个人学习项目，使用 C++ 实现售票功能，逐步学习类封装、多线程、线程池、HTTP 接口和 SQLite 数据存储。
 
-## 当前版本：V5 — Network API
+## 当前进度：V6 — SQLite 数据存储（进行中）
 
-文档导航：[V5 架构图与执行流程](docs/V5-ARCHITECTURE.md) · [HTTP API 说明](docs/API.md)
+文档：[HTTP 接口说明](docs/API.md) · [V5 架构与流程（历史版本）](docs/V5-ARCHITECTURE.md)
 
-```mermaid
-flowchart TD
-    Client[客户端 / Postman] -->|HTTP + JSON| API[ApiServer / cpp-httplib]
-    API -->|GET /health| Health[健康检查响应]
-    API -->|GET /tickets| Read[读取剩余票数]
-    API -->|POST /tickets/purchase| Submit[TicketSystem.submitPurchaseRequest]
-    Submit -->|封装任务| Pool[ThreadPool / 3 个业务工作线程]
-    Pool --> Process[TicketSystem.processOneRequest]
-    Process -->|dataMutex 保护| Data[库存 / 票号 / 销售记录 / 统计]
-    Read -->|dataMutex 保护| Data
-    Process -->|promise 设置 PurchaseResult| Future[future]
-    Future -->|HTTP 处理线程等待 get| API
-    API -->|状态码 + JSON| Client
-```
+已完成：
 
-- `GET /health`：健康检查。
-- `GET /tickets`：查询剩余票数。
-- `POST /tickets/purchase`：提交购票请求，返回票号和剩余库存。
-- 业务线程池固定为 3 个线程，库存、票号与销售记录由互斥锁保护。
-- 服务器启动时初始化 100 张票；数据保存在内存中，重启后重置。
+- 使用 Postman 发送 HTTP 请求，支持查询库存和购票。
+- 使用线程池处理购票任务，通过互斥锁保护库存和票号。
+- 使用 SQLite 保存库存、下一张票号和售票记录。
+- 重启后从数据库恢复库存和下一张票号。
+- 一次购票中的库存更新和记录插入放在同一事务中，失败时一起撤销。
+- 将购票任务中的异常传回 HTTP 层，返回错误响应。
 
-HTTP 请求由 cpp-httplib 调度，购票任务交给独立业务线程池执行；HTTP 处理线程通过 `future.get()` 等待结果。3 个业务线程共享同一把业务锁，库存检查和整单扣减在锁内完成，库存不足时整单失败。
+待完成：查询历史售票记录的数据库方法及 HTTP 接口。
 
-## 版本演进与历史编号
+## 当前接口
 
-这里的 V1–V5 表示当前学习路线中的阶段。早期 GitHub 编号与路线编号不同；保留原有提交、分支名和标签，不重写历史。
+本机地址：`http://localhost:8080`。
 
-| 当前路线阶段 | 功能 | 对应的已有 Git 历史 |
+| 方法 | 路径 | 功能 |
 | --- | --- | --- |
-| V1 — 基础多线程 | 学习线程与共享票数，是路线中的起点 | 未单独作为本仓库的首次提交 |
-| V2 — 类封装与互斥锁 | `TicketSystem` 类、互斥保护、销售记录和窗口统计 | 首次提交 `6c52e77`，当时命名为 V1，标签 `v1.0` |
-| V3 — Request Queue / Producer–Consumer | `TicketRequest`、请求队列、条件变量、工作线程消费请求 | `3145b96`，早期分支 `feature/v2-request-queue`、标签 `v2.0` |
-| V4 — Thread Pool | 独立线程池、通用任务队列、等待任务完成和线程回收 | `f774eef`，分支 `feature/v4-thread-pool`、标签 `v4.0` |
-| V5 — Network API | HTTP 路由、JSON 请求响应、`promise / future` 传回购票结果 | `31ad72b`，分支 `feature/v5-network-api`、标签 `v5.0` |
+| GET | `/health` | 检查服务是否运行 |
+| GET | `/tickets` | 查询剩余票数 |
+| POST | `/tickets/purchase` | 购买指定数量的票 |
 
-**早期 `feature/v2-request-queue` 实际对应当前规划中的 V3 Request Queue 阶段。** 旧提交信息、README 或标签中的 V2 是当时的开发编号，不表示缺少请求队列阶段。
+Postman 购票时选择 **Body → raw → JSON**，输入：
 
-### V3 — 请求队列与生产者—消费者模型
-
-用户提交购票请求，`TicketSystem` 将请求加入 `requestQueue`，通过 `condition_variable` 通知窗口线程领取并处理请求。该阶段在业务类中管理请求队列和线程协作，记录请求、用户及售票结果。
-
-```text
-用户请求 → TicketSystem::requestQueue → 窗口工作线程 → processOneRequest()
+```json
+{
+  "user_id": 1001,
+  "ticket_count": 2
+}
 ```
 
-### V4 — 通用线程池
-
-V4 把 V3 的线程调度职责移入 `ThreadPool`，使用 `queue<std::function<void()>>` 保存可调用任务。`TicketSystem` 将购票请求封装为任务提交给线程池，保留业务数据的互斥保护。
-
-已发布的 `v4.0` 标签保留在源码提交 `f774eef`。V4 的 README 整理作为后续文档提交，不移动该标签；查看 `v4.0` 时会看到发布当时的旧 README。
-
-### V5 — Network API
-
-新增 `ApiServer`，通过 cpp-httplib 接收 HTTP 请求，使用 nlohmann/json 解析和生成 JSON。`TicketSystem::submitPurchaseRequest()` 返回 `future<PurchaseResult>`，HTTP 处理函数等待线程池中的业务任务完成后返回状态码和结果。对应分支为 `feature/v5-network-api`，版本标签为 `v5.0`。
-
-## 项目结构
-
-```text
-CppTicketSystem.sln
-README.md
-docs/
-├── V5-ARCHITECTURE.md          # V5 架构图、时序图与并发模型
-└── API.md                     # HTTP 接口、字段、状态码与调用示例
-TicketSystemCore/
-├── main.cpp                    # 启动服务器
-├── ApiServer.h / .cpp          # HTTP 路由与 JSON 转换
-├── TicketSystem.h / .cpp       # 购票业务与异步结果
-├── ThreadPool.h / .cpp         # 任务队列与工作线程
-├── external/httplib.h          # cpp-httplib 0.56.0
-├── external/json.hpp           # nlohmann/json 3.12.0
-├── TicketSystemCore.vcxproj
-└── TicketSystemCore.vcxproj.filters
-```
-
-两个第三方库均以头文件随仓库提供，文件中保留上游版权及许可证声明。
-
-## 构建与运行
-
-使用 Windows 10 或更新系统、Visual Studio 2022、MSVC v143 工具集和 Windows SDK，并安装“使用 C++ 的桌面开发”。
-
-1. 打开 `CppTicketSystem.sln`。
-2. 选择 `Debug | x64` 或 `Release | x64`，生成解决方案。
-3. 使用 Ctrl+F5 运行 `TicketSystemCore`，保持服务器窗口开启。
-4. 使用 Postman 或下方命令访问 `http://localhost:8080`。
-
-也可在 Visual Studio Developer PowerShell 的仓库根目录执行：
-
-```powershell
-msbuild .\CppTicketSystem.sln /m /p:Configuration=Debug /p:Platform=x64
-.\x64\Debug\TicketSystemCore.exe
-```
-
-程序持续监听 `0.0.0.0:8080`；本机测试使用 `localhost:8080`，确保端口未被占用。使用 Ctrl+C 停止程序。
-
-## API 使用示例
-
-在另一个 PowerShell 窗口执行：
-
-```powershell
-Invoke-RestMethod http://localhost:8080/health
-Invoke-RestMethod http://localhost:8080/tickets
-Invoke-RestMethod http://localhost:8080/tickets/purchase -Method Post -ContentType 'application/json' -Body '{"user_id":1001,"ticket_count":2}'
-```
-
-初始余票查询返回 `{"remaining_tickets":100}`。首次购买 2 张票成功时返回 HTTP 201：
+假设库存为 100、下一张票号为 1，成功时返回 HTTP 201：
 
 ```json
 {
@@ -121,23 +47,109 @@ Invoke-RestMethod http://localhost:8080/tickets/purchase -Method Post -ContentTy
 }
 ```
 
-| 场景 | HTTP 状态码 | 说明 |
+参数错误返回 `400`，库存不足返回 `409`，购票中的数据库异常返回 `500`。
+
+## 数据库
+
+使用 SQLite，数据保存在 `ticket.db`，不需要单独启动数据库服务。
+
+| 表名 | 字段 | 作用 |
 | --- | --- | --- |
-| 健康检查、余票查询 | 200 | 返回服务器状态或剩余票数 |
-| 购票成功 | 201 | 返回票号列表与剩余票数 |
-| JSON 无法解析、缺少字段、字段不是整数 | 400 | 拒绝无效请求 |
-| `ticket_count` 小于等于 0 | 400 | 拒绝无效购票数量 |
-| 库存不足 | 409 | 不扣减库存 |
-| 处理函数捕获到其他标准异常 | 500 | 返回内部错误 |
+| `inventory` | `id`、`remaining_tickets`、`next_ticket_id` | 保存当前库存和下一张票号，使用 `id = 1` 的一条记录 |
+| `sales` | `ticket_id`、`user_id`、`request_id`、`sale_time_ms` | 每张售出的票对应一条记录，时间保存为 Unix 时间戳（毫秒） |
 
-`user_id` 和 `ticket_count` 是必填整数字段；`requestId` 由服务器自动生成。并发请求的处理顺序不固定，返回票号也可能不同。
+首次运行时创建表，并在初始记录不存在时写入 100 张票、起始票号 1；已有库存不会被覆盖。`request_id` 是本次程序运行中生成的请求编号，重启后重新计数。
 
-完整请求约束、错误响应和可重复的手工验证步骤见 [API 说明](docs/API.md)。响应中的余票是处理时的快照；重复提交同一请求会再次购票，当前没有幂等去重机制。
+数据库文件使用相对路径，位于程序的工作目录。重启时应使用相同的工作目录，才能读取同一份数据。
 
-## 当前范围与后续改进
+## 购票流程
 
-V5 是 HTTP 售票学习版本，尚未实现登录鉴权、持久化、退款或 `/statistics` 接口。当前未对整数超出 C++ `int` 范围的情况做显式校验，线程池也未提供任务异常捕获或工作线程数量校验。后续可完善参数边界、异常处理和数据库存储。
+```text
+Postman 发送请求
+    → ApiServer 解析 JSON
+    → TicketSystem 将购票任务交给 ThreadPool
+    → 加锁，检查数量和库存，准备本次购票数据
+    → TicketRepository.savePurchase() 保存到数据库
+    → 保存成功后更新 C++ 内存中的库存和记录
+    → 通过 promise / future 返回结果
+    → ApiServer 返回 HTTP 响应
+```
 
-## 仓库文件管理
+`savePurchase()` 内部使用同一个数据库连接完成事务：
 
-仅提交源码、第三方头文件、项目配置和文档。`.gitignore` 排除 `.vs/`、`x64/`、`x86/`、`Debug/`、`Release/` 以及 `*.obj`、`*.exe`、`*.pdb` 等构建产物。
+```text
+BEGIN IMMEDIATE
+    → updateInventoryOnConnection() 更新库存和下一张票号
+    → insertSaleOnConnection() 逐条插入本次售票记录
+    → 全部成功：COMMIT
+    → 执行失败：ROLLBACK，再向上抛出异常
+```
+
+例如购买两张票时，第二条记录写入失败，库存更新和第一条记录都会被撤销。数据库保存成功后才更新内存，避免购票失败却扣减内存库存。
+
+## 项目结构
+
+```text
+CppTicketSystem.sln
+README.md
+docs/                             # 接口说明和历史架构图
+TicketSystemCore/
+├── main.cpp                      # 初始化数据库并启动服务
+├── ApiServer.h / .cpp             # HTTP 请求和 JSON 响应
+├── TicketSystem.h / .cpp          # 购票业务
+├── ThreadPool.h / .cpp            # 任务队列和工作线程
+├── TicketRepository.h / .cpp      # SQLite 数据库操作
+├── SaleRecord.h                  # 售票记录结构
+├── external/httplib.h             # HTTP 库
+├── external/json.hpp              # JSON 库
+├── external/sqlite3.c / .h        # SQLite 库
+└── TicketSystemCore.vcxproj       # Visual Studio 项目配置
+```
+
+第三方库已随项目提供，保留其原有版权和许可说明。
+
+## 构建与运行
+
+使用 Visual Studio 2022，安装“使用 C++ 的桌面开发”，使用 MSVC v143 工具集和 Windows SDK。
+
+1. 打开 `CppTicketSystem.sln`。
+2. 选择 `Debug | x64` 或 `Release | x64`，生成解决方案。
+3. 使用 Ctrl+F5 运行 `TicketSystemCore`，保持服务窗口开启。
+4. 在 Postman 中访问上述接口。
+
+服务使用 8080 端口，启动前确保端口未被占用。数据库初始化失败时会输出错误并停止启动。
+
+## 已完成的测试
+
+本阶段已进行手动接口测试和临时测试程序验证：
+
+| 测试内容 | 结果 |
+| --- | --- |
+| 正常购票 | 返回 201，正确扣减库存并保存每张票的记录 |
+| 数量无效、缺少字段、字段类型或 JSON 格式错误 | 返回 400，不扣减库存 |
+| 库存不足 | 返回 409，不扣减库存 |
+| 重启后查询并继续购票 | 库存保留，票号继续递增 |
+| 数据库初始化失败 | 输出错误，停止启动 |
+| 第二条售票记录故意写入失败 | 整笔事务回滚，数据库及内存状态保持原值 |
+| 数据库故障经过 HTTP 接口返回 | 返回 500；移除故障后，同一服务可继续正常购票 |
+
+故障测试使用独立临时数据库，未修改原有购票数据。临时测试程序未作为固定测试文件保存到仓库。
+
+## 当前范围与下一步
+
+当前用于本机、单个服务实例的学习和功能验证。尚未实现登录、退款、重复请求去重及售票记录查询接口；重复发送购票请求会再次购买。
+
+下一步补充从数据库查询历史售票记录的功能，再通过 HTTP 接口返回。启动时目前只恢复库存和下一张票号，没有把历史售票记录加载到内存。
+
+## 版本记录
+
+V1–V6 是当前学习路线的阶段编号，早期 Git 编号与路线不同，保留已有历史。
+
+| 阶段 | 主要内容 | 已有 Git 记录 |
+| --- | --- | --- |
+| V1 | 基础线程与共享票数 | 未单独提交 |
+| V2 | 类封装、互斥锁、售票记录 | `6c52e77`，早期标签 `v1.0` |
+| V3 | 请求队列、条件变量、生产者与消费者 | `3145b96`，早期标签 `v2.0` |
+| V4 | 通用线程池 | `f774eef`，标签 `v4.0` |
+| V5 | HTTP 接口、JSON、promise / future | `31ad72b`，标签 `v5.0` |
+| V6 | SQLite 持久化、购票事务、异常传递 | 进行中，售票记录查询待完成 |

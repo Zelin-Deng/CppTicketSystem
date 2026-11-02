@@ -1,14 +1,14 @@
-# V5 HTTP API 说明
+# HTTP API 说明（V6 当前进度）
 
 [返回 README](../README.md) · [V5 架构图](V5-ARCHITECTURE.md)
 
-本文对应已提交的 V5 源码 `31ad72b`（标签 `v5.0`）。接口行为以该版本的 `ApiServer.cpp` 和 `TicketSystem.cpp` 为准。
+本文对应当前工作区的接口实现。V6 已加入 SQLite 存储，售票记录查询接口尚未实现；V5 架构图保留作历史参考。
 
 ## 基本约定
 
 - 本机地址：`http://localhost:8080`，服务监听 `0.0.0.0:8080`。
 - 请求体使用 JSON，购票时发送 `Content-Type: application/json`；下述路由的应用响应类型为 `application/json`。
-- 当前无鉴权。初始库存为 100，票号从 1 开始，重启服务后重置。
+- 当前无鉴权。首次初始化时库存为 100，票号从 1 开始；重启后从同一份 `ticket.db` 恢复库存和下一张票号。
 - 字段名区分大小写；额外字段不参与处理。未定义路由的响应由 HTTP 库处理，不保证使用本文的 JSON 错误格式。
 
 | 方法 | 路径 | 用途 | 正常状态码 |
@@ -32,7 +32,7 @@
 
 ## GET /tickets
 
-无请求参数。新启动且尚未售票时返回 HTTP 200：
+无请求参数。首次初始化且尚未售票时返回 HTTP 200；已有数据时返回实际剩余库存：
 
 ```json
 {
@@ -60,7 +60,7 @@
 
 字符串、浮点数（包括 `2.0`）、布尔值和 `null` 不满足整数检查。客户端应将两字段限制在 MSVC 32 位 `int` 范围 `[-2147483648, 2147483647]` 内；当前服务未显式校验超出此范围的整数，不保证将其返回为 400。
 
-服务器在字段校验通过后生成内部 `requestId`，客户端无需提供。它不出现在响应中，也不能用于去重。
+服务器在字段校验通过后生成内部 `requestId`，客户端无需提供。它不出现在响应中，重启后重新计数，也不能用于去重。
 
 ### 成功：HTTP 201
 
@@ -91,17 +91,17 @@ JSON 解析、必填字段或字段类型检查失败时，仅返回 `success` �
 ```json
 {
   "success": false,
-  "message": "Missing required fields"
+  "message": "Missing required fields."
 }
 ```
 
 | 触发条件 | 精确的 `message` |
 | --- | --- |
-| JSON 无法解析（包括空请求体） | `Invalid JSON format` |
-| 缺少 `user_id` 或 `ticket_count` | `Missing required fields` |
-| 两字段任意一个不是 JSON 整数 | `user_id and ticket_count must be integers` |
+| JSON 无法解析（包括空请求体） | `Invalid JSON format.` |
+| 缺少 `user_id` 或 `ticket_count` | `Missing required fields.` |
+| 两字段任意一个不是 JSON 整数 | `user_id and ticket_count must be integers.` |
 
-校验按解析、字段存在、字段类型的顺序进行。以上错误消息末尾没有句号。
+校验按解析、字段存在、字段类型的顺序进行。以上错误消息末尾带有句号。
 
 ### 数量无效：HTTP 400
 
@@ -131,16 +131,16 @@ JSON 解析、必填字段或字段类型检查失败时，仅返回 `success` �
 
 ### 内部错误：HTTP 500
 
-购票 HTTP 处理函数捕获到除 JSON 解析错误以外的标准异常时返回：
+购票任务发生数据库等异常时，通过 promise / future 传回 HTTP 处理线程，由全局异常处理函数返回：
 
 ```json
 {
   "success": false,
-  "message": "Internal server error"
+  "message": "Internal server error."
 }
 ```
 
-这一捕获范围不包含业务工作线程中逃逸的异常，不能保证所有内部故障都返回此 JSON。
+数据库操作失败时，购票事务回滚，内存库存保持原值；具体错误输出到服务控制台。
 
 ## PowerShell 调用示例
 
@@ -165,16 +165,16 @@ Postman 中选择对应方法和 URL；购票接口选择 **Body → raw → JSO
 
 ## 手工验证清单
 
-使用刚启动的服务，在没有其他客户端购票的情况下依次执行。购票行均发送至 `POST /tickets/purchase`：
+下表以首次初始化的测试数据库（库存 100、下一张票号 1）为例，在没有其他客户端购票时依次执行。已有数据时应按实际库存和票号核对，不要清空原数据库。购票行均发送至 `POST /tickets/purchase`：
 
 | 步骤 | 请求 | 预期状态码 | 预期结果 |
 | --- | --- | --- | --- |
 | 1 | `GET /health` | 200 | `status` 为 `ok` |
 | 2 | `GET /tickets` | 200 | 余票 100 |
 | 3 | `{"user_id":1001,"ticket_count":2}` | 201 | 票号 `[1,2]`，余票 98 |
-| 4 | `{"user_id":1001}` | 400 | `Missing required fields` |
+| 4 | `{"user_id":1001}` | 400 | `Missing required fields.` |
 | 5 | `{"user_id":1001,"ticket_count":"2"}` | 400 | 字段类型错误 |
-| 6 | 原始请求体 `{` | 400 | `Invalid JSON format` |
+| 6 | 原始请求体 `{` | 400 | `Invalid JSON format.` |
 | 7 | `{"user_id":1001,"ticket_count":0}` | 400 | 空票号数组，余票 98 |
 | 8 | `{"user_id":1001,"ticket_count":99}` | 409 | 空票号数组，余票 98 |
 | 9 | `GET /tickets` | 200 | 余票仍为 98 |
@@ -185,4 +185,4 @@ Postman 中选择对应方法和 URL；购票接口选择 **Body → raw → JSO
 
 业务线程池异步处理任务，但 HTTP 处理函数通过 `future.get()` 等待业务完成后才返回；当前没有设置业务结果等待超时。库存快照不能保证下一次购票仍然有票。
 
-当前没有用户查询、订单查询、退款或 `/statistics` HTTP 接口。
+当前没有售票记录查询、用户查询、订单查询、退款或 `/statistics` HTTP 接口。

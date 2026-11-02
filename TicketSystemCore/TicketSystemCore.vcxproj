@@ -124,7 +124,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ApiServer.cpp" />
+    <ClCompile Include="external\sqlite3.c" />
     <ClCompile Include="ThreadPool.cpp" />
+    <ClCompile Include="TicketRepository.cpp" />
     <ClCompile Include="TicketSystem.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
@@ -132,7 +134,10 @@
     <ClInclude Include="ApiServer.h" />
     <ClInclude Include="external\json.hpp" />
     <ClInclude Include="external\httplib.h" />
+    <ClInclude Include="external\sqlite3.h" />
     <ClInclude Include="ThreadPool.h" />
+    <ClInclude Include="TicketRepository.h" />
+    <ClInclude Include="SaleRecord.h" />
     <ClInclude Include="TicketSystem.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
